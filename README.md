@@ -42,7 +42,7 @@ No frameworks. No installs. Just open the file.
 3. Find this line:
 
 ```js
-const WALLET = "tz1REPLACE_WITH_YOUR_ADDRESS";
+const WALLET = "YOUR TEZOS ADDRESS HERE";
 ```
 
 4. Replace it with your wallet:
