@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!--
+    Content Security Policy — restricts what the page can load and execute.
+
+    Why 'unsafe-inline' is kept for script-src:
+    This is a fully self-contained static HTML file with no server to generate
+    nonces and no build step to produce an external script file. Moving to a
+    nonce or external script would require a server or build pipeline, breaking
+    the self-contained design. 'unsafe-inline' here only permits the scripts
+    already written in this file — it does NOT allow injected scripts because
+    all user-supplied data is set via textContent or escHtml(), never eval'd.
+    The CSP still blocks: external scripts, external frames, external images,
+    cross-origin fetches, and form submissions.
+
+    Why 'unsafe-inline' is kept for style-src:
+    Required for inline styles set by JS (zoom modal sizing, card layouts).
+
+    - script-src 'unsafe-inline': inline scripts in this file only (see above)
+    - img-src data: blob:: on-chain artwork data URIs and blob URLs
+    - frame-src data:: sandboxed data:text/html interactive NFT iframes
+    - connect-src: API calls to TzKT only
+    - style-src 'unsafe-inline' fonts.googleapis.com: inline styles + Google Fonts
+    - font-src fonts.gstatic.com: Google Fonts files
+    - base-uri 'none': prevents base tag injection
+    - form-action 'none': no form submissions possible
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'unsafe-inline';
+    img-src 'self' data: blob:;
+    frame-src data: blob:;  /* blob: needed for SVG animation iframes */
+    connect-src https://api.tzkt.io https://tzkt.io;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    base-uri 'none';
+    form-action 'none';
+  ">
+  <title>On-Chain Tezos Art</title><!-- updated dynamically from wallet profile -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    /* =========================================================
+       COLOURS — change these to restyle the entire site.
+       All colours in the UI reference these variables so you
+       only need to edit values here to change the theme.
+       ========================================================= */
+    :root {
+      --neon-pink:    #ff2d78;  /* accent colour: card corners, section bar, tzkt buttons */
+      --neon-cyan:    #00f0ff;  /* primary colour: logo, card titles, borders, nav tabs    */
+      --neon-yellow:  #ffe600;  /* highlight colour: section labels, info panel labels     */
+      --dark-bg:      #07000f;  /* page background                                         */
+      --card-bg:      #0d0020;  /* card and info panel background                          */
+      --grid-line:    rgba(0,240,255,0.07);  /* background grid line colour                */
+      --border-dim:   rgba(0,240,255,0.2);   /* default border colour                      */
+      --border-bright:rgba(0,240,255,0.6);   /* zoom modal artwork border                  */
+    }
+    * { box-sizing: border-box; margin:0; padding:0; }
+    body {
+      font-family: 'Share Tech Mono', monospace;
+      background: var(--dark-bg);
+      color: #e0e0ff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    body::before {
+      content:'';
+      position:fixed; inset:0; z-index:0;
+      background:
+        repeating-linear-gradient(90deg,  var(--grid-line) 0,var(--grid-line) 1px,transparent 1px,transparent 60px),
+        repeating-linear-gradient(180deg, var(--grid-line) 0,var(--grid-line) 1px,transparent 1px,transparent 60px);
+      pointer-events:none;
+    }
+    body::after {
+      content:'';
+      position:fixed; bottom:0; left:0; right:0; height:2px; z-index:1;
+      background:linear-gradient(90deg,transparent,var(--neon-pink),var(--neon-cyan),transparent);
+      pointer-events:none;
+    }
+
+    /* ── Header ── */
+    .header {
+      position:relative; z-index:2;
+      padding: 54px 20px 44px;
+      text-align:center;
+      background: linear-gradient(180deg,#1a003a 0%,var(--dark-bg) 100%);
+    }
+    .header::after {
+      content:'';
+      position:absolute; inset:0;
+      background:repeating-linear-gradient(180deg,transparent 0,transparent 3px,rgba(0,0,0,.08) 3px,rgba(0,0,0,.08) 4px);
+      pointer-events:none; z-index:3;
+    }
+    .header-logo {
+      font-family:'Orbitron',sans-serif; font-weight:900;
+      font-size:clamp(36px,8vw,72px); letter-spacing:.12em;
+      color:var(--neon-cyan);
+      text-shadow:0 0 10px var(--neon-cyan),0 0 30px var(--neon-cyan),0 0 60px rgba(0,240,255,.4);
+      line-height:1; position:relative; z-index:2;
+    }
+    .header-sub {
+      font-family:'Orbitron',sans-serif; font-weight:700;
+      font-size:clamp(10px,2.5vw,16px); letter-spacing:.3em;
+      color:var(--neon-pink); text-shadow:0 0 8px var(--neon-pink);
+      margin-top:10px; text-transform:uppercase; position:relative; z-index:2;
+    }
+
+    /* ── Collection navigation bar ── */
+    #collection-nav {
+      position:sticky; top:0; z-index:50;
+      background:rgba(7,0,15,.95);
+      border-bottom:1px solid var(--border-dim);
+      padding:0 24px;
+      display:flex; align-items:center; gap:0;
+      overflow-x:auto;
+      scrollbar-width:thin;
+      scrollbar-color: var(--neon-cyan) transparent;
+    }
+    #collection-nav::-webkit-scrollbar { height:3px; }
+    #collection-nav::-webkit-scrollbar-thumb { background:var(--neon-cyan); }
+    .nav-tab {
+      font-family:'Orbitron',sans-serif; font-weight:700;
+      font-size:10px; letter-spacing:.15em; text-transform:uppercase;
+      color:rgba(0,240,255,.45);
+      padding:14px 18px;
+      border-bottom:2px solid transparent;
+      cursor:pointer; white-space:nowrap;
+      transition:color .15s, border-color .15s;
+      flex-shrink:0;
+    }
+    .nav-tab:hover { color:var(--neon-cyan); }
+    .nav-tab.active {
+      color:var(--neon-cyan);
+      border-bottom-color:var(--neon-cyan);
+      text-shadow:0 0 6px var(--neon-cyan);
+    }
+
+    /* ── Section headers ── */
+    .section-header { position:relative; z-index:2; padding:40px 24px 0; }
+    .section-label {
+      font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px;
+      letter-spacing:.35em; color:var(--neon-yellow); text-shadow:0 0 6px var(--neon-yellow);
+      text-transform:uppercase; margin-bottom:6px;
+    }
+    .section-title-row {
+      display:flex; align-items:center; gap:14px;
+      padding-bottom:12px; border-bottom:1px solid var(--border-dim);
+    }
+    .section-title-row::before {
+      content:''; display:inline-block; width:4px; height:22px; flex-shrink:0;
+      background:var(--neon-pink); box-shadow:0 0 8px var(--neon-pink);
+    }
+    .section-title-text {
+      font-family:'Orbitron',sans-serif; font-weight:700;
+      font-size:clamp(14px,3vw,22px); color:#fff; letter-spacing:.05em;
+      flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .collection-tzkt-link {
+      font-family:'Orbitron',sans-serif; font-size:9px; font-weight:700;
+      letter-spacing:.12em; color:var(--neon-cyan); text-decoration:none;
+      border:1px solid var(--neon-cyan); padding:4px 10px; border-radius:2px;
+      white-space:nowrap; flex-shrink:0; text-transform:uppercase;
+      transition:background .15s,color .15s;
+    }
+    .collection-tzkt-link:hover { background:var(--neon-cyan); color:#000; }
+
+    /* ── Grid ── */
+    .grid-wrap { position:relative; z-index:2; padding:20px 24px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:20px; }
+
+    /* ── Cards ── */
+    .card {
+      background:var(--card-bg); border:1px solid var(--border-dim);
+      border-radius:4px; overflow:hidden; position:relative; cursor:pointer;
+      transition:border-color .2s,transform .2s;
+    }
+    .card:hover { border-color:var(--neon-cyan); transform:translateY(-3px); }
+    .card::before,.card::after {
+      content:''; position:absolute; width:12px; height:12px; z-index:4; pointer-events:none;
+    }
+    .card::before {
+      top:-1px; left:-1px;
+      border-top:2px solid var(--neon-cyan); border-left:2px solid var(--neon-cyan);
+      box-shadow:-1px -1px 6px var(--neon-cyan);
+    }
+    .card::after {
+      bottom:-1px; right:-1px;
+      border-bottom:2px solid var(--neon-pink); border-right:2px solid var(--neon-pink);
+      box-shadow:1px 1px 6px var(--neon-pink);
+    }
+    .media-wrap { position:relative; width:100%; background:#000; }
+    /* Enforce square aspect ratio on card thumbnails */
+    .media-wrap::before {
+      content:''; display:block; padding-top:100%;
+    }
+    .media-wrap img,
+    .media-wrap iframe,
+    .media-wrap svg-container {
+      position:absolute; top:0; left:0; width:100%; height:100%;
+      object-fit:contain; display:block;
+    }
+    .media-wrap iframe { border:none; pointer-events:none; }
+    .media-wrap::after {
+      content:''; position:absolute; inset:0; pointer-events:none;
+      background:repeating-linear-gradient(180deg,transparent 0,transparent 2px,rgba(0,0,0,.15) 2px,rgba(0,0,0,.15) 3px);
+      z-index:2;
+    }
+    /* Neon shimmer shown on card while image is waiting to lazy-load */
+    .media-wrap img:not([src]) {
+      background: linear-gradient(90deg,
+        rgba(0,240,255,0.03) 25%,
+        rgba(0,240,255,0.08) 50%,
+        rgba(0,240,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .zoom-hint {
+      position:absolute; top:8px; right:8px; z-index:5; pointer-events:none;
+      background:rgba(0,0,0,.7); color:var(--neon-cyan);
+      font-family:'Share Tech Mono',monospace; font-size:10px;
+      padding:3px 7px; border:1px solid var(--neon-cyan); letter-spacing:.1em;
+      opacity:0; transition:opacity .2s;
+    }
+    .card:hover .zoom-hint { opacity:1; }
+    .card-footer { padding:10px 12px 12px; border-top:1px solid var(--border-dim); }
+    .card-title {
+      font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px;
+      letter-spacing:.08em; color:var(--neon-cyan); text-shadow:0 0 6px rgba(0,240,255,.4);
+      text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .card-meta-row {
+      display:flex; align-items:center; justify-content:space-between; margin-top:6px; gap:8px;
+    }
+    .card-owner {
+      font-family:'Share Tech Mono',monospace; font-size:9px;
+      color:rgba(255,255,255,.3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      flex:1; min-width:0;
+    }
+    .tzkt-link {
+      font-family:'Orbitron',sans-serif; font-size:9px; font-weight:700;
+      letter-spacing:.1em; color:var(--neon-pink); text-decoration:none;
+      border:1px solid var(--neon-pink); padding:3px 8px; border-radius:2px;
+      white-space:nowrap; flex-shrink:0; text-transform:uppercase;
+      transition:background .15s,color .15s;
+    }
+    .tzkt-link:hover { background:var(--neon-pink); color:#000; }
+
+    /* ── Zoom modal ── */
+    #zoom-modal {
+      display:none; position:fixed; inset:0; z-index:9999;
+      background:rgba(7,0,15,.97); overflow-y:auto;
+    }
+    #zoom-modal.open { display:block; }
+    #zoom-modal::before {
+      content:''; position:fixed; inset:0;
+      background:repeating-linear-gradient(180deg,transparent 0,transparent 3px,rgba(0,0,0,.1) 3px,rgba(0,0,0,.1) 4px);
+      pointer-events:none; z-index:0;
+    }
+    #zoom-backdrop { position:fixed; inset:0; z-index:1; cursor:zoom-out; }
+    #zoom-layout {
+      position:relative; z-index:2;
+      display:flex; flex-direction:column; align-items:center;
+      padding:60px 24px 80px; min-height:100vh;
+    }
+    #zoom-close {
+      position:fixed; top:16px; right:20px; z-index:20; pointer-events:auto;
+      font-family:'Orbitron',sans-serif; font-size:20px; font-weight:900;
+      color:var(--neon-cyan); cursor:pointer; opacity:.8;
+      text-shadow:0 0 8px var(--neon-cyan); letter-spacing:.05em;
+    }
+    #zoom-close:hover { opacity:1; }
+
+
+
+    /* Arrow navigation */
+    .zoom-nav {
+      position:fixed; top:50%; transform:translateY(-50%); z-index:20;
+      font-family:'Orbitron',sans-serif; font-size:22px; font-weight:900;
+      color:var(--neon-cyan); cursor:pointer; opacity:.5;
+      text-shadow:0 0 10px var(--neon-cyan);
+      background:rgba(7,0,15,.6);
+      border:1px solid var(--border-dim);
+      padding:14px 10px; line-height:1;
+      transition:opacity .15s, border-color .15s;
+      user-select:none;
+    }
+    .zoom-nav:hover { opacity:1; border-color:var(--neon-cyan); }
+    .zoom-nav.hidden { display:none; }
+    #zoom-prev { left:12px; }
+    #zoom-next { right:12px; }
+
+    #zoom-counter {
+      position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:20;
+      font-family:'Share Tech Mono',monospace; font-size:11px;
+      color:rgba(0,240,255,.5); letter-spacing:.15em;
+    }
+
+    /* Artwork container — preserves native aspect ratio on resize */
+    #zoom-art-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border-bright);
+      box-shadow: 0 0 40px rgba(0,240,255,.12), 0 0 80px rgba(191,0,255,.08);
+    }
+
+    /* All zoom images — JS sets both width and height explicitly in onload.
+       No CSS sizing here so nothing can fight or override the JS values. */
+    #zoom-modal img {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    #zoom-modal iframe { display:block; border:none; }
+
+    #zoom-scale-label {
+      font-family:'Share Tech Mono',monospace; font-size:11px;
+      color:rgba(0,240,255,.45); letter-spacing:.15em;
+      margin-top:10px; text-align:center;
+    }
+
+    /* Info panels */
+    #zoom-info {
+      width:100%; max-width:860px; margin-top:36px;
+      display:grid; grid-template-columns:1fr 1fr; gap:24px;
+      justify-items:center;
+    }
+    /* When only the description panel is present (no attributes),
+       make it span both columns and cap its width so it doesn't
+       stretch awkwardly across the full grid. */
+    #zoom-info.single-panel {
+      grid-template-columns:1fr;
+      max-width:520px;
+    }
+    @media(max-width:640px){ #zoom-info{ grid-template-columns:1fr; } }
+
+    .info-panel {
+      background:rgba(13,0,32,.9); border:1px solid var(--border-dim);
+      border-radius:4px; padding:18px 20px; position:relative;
+    }
+    .info-panel::before,.info-panel::after {
+      content:''; position:absolute; width:10px; height:10px; pointer-events:none;
+    }
+    .info-panel::before { top:-1px; left:-1px; border-top:2px solid var(--neon-cyan); border-left:2px solid var(--neon-cyan); }
+    .info-panel::after  { bottom:-1px; right:-1px; border-bottom:2px solid var(--neon-pink); border-right:2px solid var(--neon-pink); }
+    .info-panel-label {
+      font-family:'Orbitron',sans-serif; font-size:9px; font-weight:700;
+      letter-spacing:.35em; color:var(--neon-yellow); text-shadow:0 0 5px var(--neon-yellow);
+      text-transform:uppercase; margin-bottom:10px;
+    }
+    .info-title {
+      font-family:'Orbitron',sans-serif; font-weight:900;
+      font-size:clamp(15px,3vw,22px); color:var(--neon-cyan);
+      text-shadow:0 0 8px rgba(0,240,255,.4); letter-spacing:.06em;
+      margin-bottom:6px; line-height:1.3;
+    }
+    .info-mint-date {
+      font-family:'Share Tech Mono',monospace; font-size:10px;
+      color:rgba(255,255,255,.3); letter-spacing:.1em; margin-bottom:10px;
+    }
+    .info-description {
+      font-family:'Share Tech Mono',monospace; font-size:12px;
+      line-height:1.8; color:rgba(224,224,255,.75);
+    }
+    .info-description:empty::before { content:'> no description on-chain.'; opacity:.35; }
+    .attr-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:8px; }
+    .attr-item {
+      background:rgba(0,0,0,.4); border:1px solid rgba(0,240,255,.15);
+      border-radius:3px; padding:8px 10px;
+    }
+    .attr-trait {
+      font-family:'Share Tech Mono',monospace; font-size:9px;
+      color:var(--neon-pink); letter-spacing:.1em; text-transform:uppercase; margin-bottom:3px;
+    }
+    .attr-value {
+      font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px;
+      color:#fff; letter-spacing:.05em; word-break:break-word;
+    }
+    .attr-empty { font-family:'Share Tech Mono',monospace; font-size:11px; color:rgba(255,255,255,.2); }
+    .info-owner-row {
+      display:flex; align-items:center; gap:8px; margin-top:12px;
+      padding-top:12px; border-top:1px solid var(--border-dim);
+    }
+    .info-owner-label {
+      font-family:'Share Tech Mono',monospace; font-size:9px;
+      color:rgba(255,255,255,.3); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap;
+    }
+    .info-owner-addr {
+      font-family:'Share Tech Mono',monospace; font-size:10px;
+      color:rgba(0,240,255,.6); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;
+    }
+
+    .state-msg {
+      position:relative; z-index:2; padding:60px 24px;
+      font-family:'Share Tech Mono',monospace; font-size:13px;
+      color:rgba(0,240,255,.5); letter-spacing:.1em;
+    }
+    .footer {
+      position:relative; z-index:2; text-align:center;
+      padding:40px 20px 30px; margin-top:60px;
+      border-top:1px solid var(--border-dim);
+      font-family:'Share Tech Mono',monospace; font-size:11px;
+      color:rgba(0,240,255,.35); letter-spacing:.12em;
+    }
+    .footer span { color:var(--neon-pink); opacity:.6; }
+    /* Sentinel: invisible trigger element at the bottom of each collection grid.
+       When it enters the viewport the next batch of cards is appended. */
+    .grid-sentinel { height: 1px; width: 100%; }
+    .footer-link {
+      color: var(--neon-cyan);
+      text-decoration: none;
+      opacity: 0.6;
+      letter-spacing: .12em;
+      transition: opacity .15s;
+    }
+    .footer-link:hover { opacity: 1; text-shadow: 0 0 8px var(--neon-cyan); }
+    .collections-wrap { padding-bottom:40px; }
+    .collection-block { margin-bottom:10px; }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <!-- =========================================================
+         BANNER TEXT — the artist name is fetched automatically
+         from the wallet's on-chain profile (Tezos Domains / TzKT).
+         The tagline below can be edited manually.
+         ========================================================= -->
+    <div class="header-logo" id="artist-name">&#8203;</div><!-- populated from wallet profile -->
+    <div class="header-sub">fully on-chain &nbsp;/&nbsp; tezos blockchain &nbsp;/&nbsp; pixel art</div><!-- ← tagline -->
+  </header>
+
+  <nav id="collection-nav"></nav>
+
+  <div class="collections-wrap" id="collections">
+    <p class="state-msg">&gt; loading tokens from chain...</p>
+  </div>
+
+  <!-- =========================================================
+       FOOTER TEXT — update the text and homepage URL below.
+       Replace "https://your-homepage-url.com" with your real URL.
+       ========================================================= -->
+  <footer class="footer">
+    all artwork is fully on-chain &nbsp;<span>//</span>&nbsp; tezos blockchain &nbsp;<span>//</span>&nbsp; <span id="footer-artist-name"></span><!-- populated from wallet profile -->
+    &nbsp;<span>//</span>&nbsp;
+    <a href="#" target="_blank" rel="noopener noreferrer" class="footer-link" id="footer-artist-link">visit <span id="footer-artist-link-name"></span></a>&apos;s website<!-- ← replace href with your homepage URL -->
+  </footer>
+
+  <!-- Zoom modal -->
+  <div id="zoom-modal">
+    <!-- backdrop is first in DOM so it's painted beneath everything else -->
+    <div id="zoom-backdrop"></div>
+    <!-- all interactive controls are after the backdrop in DOM order -->
+    <div id="zoom-layout">
+      <div id="zoom-art-wrap"></div>
+      <div id="zoom-scale-label"></div>
+      <div id="zoom-info"></div>
+    </div>
+    <div id="zoom-close" title="close [esc]">[ X ]</div>
+
+    <div id="zoom-counter"></div>
+    <div class="zoom-nav hidden" id="zoom-prev">&#8592;</div>
+    <div class="zoom-nav hidden" id="zoom-next">&#8594;</div>
+  </div>
+
+  <script>
+    // =========================================================
+    //  CONFIGURATION — edit this section to customise the site
+    // =========================================================
+
+    // Your Tezos wallet address.
+    // Replace this with your own tz1... address to show your minted tokens.
+    const WALLET = "YOUR TEZOS ADDRESS HERE";
+
+    // Tezos burn address. Tokens owned by this address will be hidden
+    // from the gallery automatically. Do not change this unless you know
+    // what you are doing — this is the canonical Tezos burn address.
+    const BURN_ADDRESS = "tz1burnburnburnburnburnburnburjAYjjX";
+
+    // Collections (smart contract addresses) to hide entirely from the gallery.
+    // Add or remove KT1... addresses here to control which collections appear.
+    // Example: "KT1AbCdEfGhIjKlMnOpQrStUvWxYz123456" — one per line, comma-separated.
+    const EXCLUDED_CONTRACTS = new Set([
+      "ADDRESS OF COLLECTION TO EXCLUDE 1",
+      "ADDRESS OF COLLECTION TO EXCLUDE 2",
+    ]);
+
+    // =========================================================
+    //  END OF CONFIGURATION
+    // =========================================================
+
+    // Single CSS.escape helper — fallback for browsers without native support.
+    // Tezos addresses are alphanumeric so the fallback is never triggered in practice.
+    const cssEscape = window.CSS?.escape || (s => s.replace(/[^\w-]/g, "_"));
+
+    /* ── State ── */
+    let allGroups = {};
+    let zoomItems = [];
+    let zoomIndex = 0;
+    let currentZoomUri     = null;  // uri of currently zoomed item
+    let currentZoomBlobUrl = null;  // active blob URL for SVG zoom iframe — revoked on replacement
+
+    /* ── Helpers ── */
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+    function shortenAddr(addr) {
+      return addr ? addr.slice(0,8) + "…" + addr.slice(-4) : "";
+    }
+    function formatDate(ts) {
+      if (!ts) return null;
+      try { return new Date(ts).toISOString().split("T")[0]; } catch(e){ return null; }
+    }
+    function isSvgUri(uri) {
+      // Match only the exact SVG MIME type, not any hypothetical data:image/svgX prefix
+      return uri.startsWith("data:image/svg+xml");
+    }
+    function isHtmlUri(uri) {
+      return uri.startsWith("data:text/html");
+    }
+
+    // Extract intrinsic dimensions from an SVG data URI.
+    // Reads viewBox first, then falls back to width/height attributes.
+    // Returns { w, h } in pixels; defaults to 500x500 if nothing found.
+    function extractSvgDims(uri) {
+      try {
+        const b64   = uri.slice(uri.indexOf(",") + 1);
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const text  = new TextDecoder().decode(bytes);
+        // Try viewBox first
+        const vb = text.match(/viewBox=["']([^"']+)["']/i);
+        if (vb) {
+          const parts = vb[1].trim().split(/[\s,]+/);
+          if (parts.length === 4) {
+            const w = parseFloat(parts[2]);
+            const h = parseFloat(parts[3]);
+            if (w > 0 && h > 0) return { w, h };
+          }
+        }
+        // Fallback: width / height attributes
+        const wm = text.match(/<svg[^>]+width=["']([0-9.]+)/i);
+        const hm = text.match(/<svg[^>]+height=["']([0-9.]+)/i);
+        if (wm && hm) return { w: parseFloat(wm[1]), h: parseFloat(hm[1]) };
+      } catch(e) {}
+      return { w: 500, h: 500 }; // safe default
+    }
+
+    // Convert a data:image/svg+xml;base64 URI to a blob: URL.
+    // Browsers block data: URIs as iframe src (navigation security policy)
+    // but freely allow blob: URLs — this is the only reliable way to render
+    // an SVG document inside an iframe so animations actually run.
+    // The caller is responsible for calling URL.revokeObjectURL() when done.
+    function svgDataUriToBlob(uri) {
+      const b64   = uri.slice(uri.indexOf(",") + 1);
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const blob  = new Blob([bytes], { type: "image/svg+xml" });
+      return URL.createObjectURL(blob);
+    }
+
+    /* ── Collection name resolver ── */
+    const nameCache = {};
+    async function resolveCollectionName(address, tzktAlias) {
+      if (nameCache[address] !== undefined) return nameCache[address];
+      if (tzktAlias) { nameCache[address] = tzktAlias; return tzktAlias; }
+      try {
+        const res = await safeFetch(`${TZKT_ORIGIN}/v1/contracts/${address}`);
+        {
+          const data = await res.json();
+          const name = data?.metadata?.name || null;
+          if (name) { nameCache[address] = name; return name; }
+        }
+      } catch(e) {}
+      const short = address.slice(0,8) + "…" + address.slice(-4);
+      nameCache[address] = short;
+      return short;
+    }
+
+    /* ── Current token owner — with 429 retry + throttled queue ── */
+    async function fetchOwner(contractAddress, tokenId, retries = 3) {
+      const url = `${TZKT_ORIGIN}/v1/tokens/balances?token.contract=${contractAddress}&token.tokenId=${tokenId}&balance.gt=0&limit=1`;
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          if (res.status === 429) {
+            await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)));
+            continue;
+          }
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data?.[0]?.account?.address || null;
+        } catch(e) { return null; }
+      }
+      return null;
+    }
+
+    /* ── Throttled owner fetch queue (max 3 concurrent) ── */
+    const OWNER_CONCURRENCY = 3;
+    let ownerQueueActive = 0;
+    const ownerQueue = [];
+
+    function enqueueOwnerFetch(contractAddress, tokenId, onResult) {
+      ownerQueue.push({ contractAddress, tokenId, onResult });
+      drainOwnerQueue();
+    }
+
+    function drainOwnerQueue() {
+      while (ownerQueueActive < OWNER_CONCURRENCY && ownerQueue.length > 0) {
+        const { contractAddress, tokenId, onResult } = ownerQueue.shift();
+        ownerQueueActive++;
+        fetchOwner(contractAddress, tokenId).then(owner => {
+          onResult(owner);
+          ownerQueueActive--;
+          drainOwnerQueue();
+        });
+      }
+    }
+
+    /* ── Zoom modal elements ── */
+    const modal       = document.getElementById("zoom-modal");
+    const zoomArt     = document.getElementById("zoom-art-wrap");
+    const zoomLabelEl = document.getElementById("zoom-scale-label");
+    const zoomInfoEl  = document.getElementById("zoom-info");
+    const prevBtn     = document.getElementById("zoom-prev");
+    const nextBtn     = document.getElementById("zoom-next");
+    const counter     = document.getElementById("zoom-counter");
+
+
+    /* ── Size an image to fit the viewport ──
+       For pixel art (small raster): integer scale so pixels stay sharp.
+       For large raster (JPEG/PNG > 512px): proportional fit like SVG —
+         integer scaling is inappropriate and causes images to be stuck
+         at native size when the window is smaller than the artwork.
+       For SVG: always fill viewport proportionally.
+       Returns { w, h, label } — both dimensions set explicitly. */
+    function computePixelPerfectSize(nw, nh, isRaster = true) {
+      const maxW  = window.innerWidth  * 0.90;
+      const maxH  = window.innerHeight * 0.78;
+      const ratio = nw / nh;
+
+      if (isRaster && nw <= 512 && nh <= 512) {
+        // Small raster — likely pixel art. Use integer scaling for sharp pixels.
+        const scale = Math.max(1, Math.floor(Math.min(maxW / nw, maxH / nh)));
+        return { w: nw * scale, h: nh * scale, scale,
+                 label: `> ${nw} x ${nh} px  //  ${scale}x scale` };
+      } else if (isRaster) {
+        // Large raster (JPEG/GIF/PNG) — scale down to fit, never upscale above native size.
+        let w = Math.min(nw, maxW);
+        let h = w / ratio;
+        if (h > maxH) { h = maxH; w = h * ratio; }
+        if (w > maxW) { w = maxW; h = w / ratio; }
+        return { w: Math.round(w), h: Math.round(h), scale: 1,
+                 label: `> ${nw} x ${nh} px` };
+      } else {
+        // SVG — always fill the available viewport. SVGs are vectors so
+        // upscaling beyond native declared size is correct and intended.
+        let w = maxW;
+        let h = w / ratio;
+        if (h > maxH) { h = maxH; w = h * ratio; }
+        return { w: Math.round(w), h: Math.round(h), scale: 1,
+                 label: `> svg  ${nw} x ${nh}` };
+      }
+    }
+
+    /* ── Build artwork element ── */
+    function buildArtElement(uri) {
+      if (isHtmlUri(uri)) {
+        const iframe = document.createElement("iframe");
+        iframe.src = uri;
+        iframe.sandbox = "allow-scripts";
+        iframe.style.width  = Math.min(window.innerWidth  * .88, 860) + "px";
+        iframe.style.height = Math.min(window.innerHeight * .75, 680) + "px";
+        iframe.style.border = "none";
+        return { el: iframe, type: "html" };
+      }
+
+      if (isSvgUri(uri)) {
+        // Render SVG via blob URL in a sandbox iframe.
+        // data: URIs are blocked as iframe src in modern browsers (navigation policy).
+        // blob: URLs are allowed and render the SVG as a full live document,
+        // so SMIL and CSS animations run correctly.
+        // empty sandbox = animations yes, scripts NO, no same-origin access.
+        // Revoke the previous blob URL before creating a new one —
+        // deterministic lifecycle, no race condition with onload timing.
+        if (currentZoomBlobUrl) {
+          URL.revokeObjectURL(currentZoomBlobUrl);
+          currentZoomBlobUrl = null;
+        }
+        const blobUrl = svgDataUriToBlob(uri);
+        currentZoomBlobUrl = blobUrl; // tracked for revocation on next navigation
+        const iframe = document.createElement("iframe");
+        iframe.src = blobUrl;
+        // allow-scripts: required for JS-driven SVG animations.
+        // No allow-same-origin: iframe is fully isolated from the parent page.
+        iframe.sandbox = "allow-scripts";
+        iframe.scrolling = "no";
+        iframe.style.cssText = "display:block;border:none;background:transparent;";
+        return { el: iframe, type: "svg-iframe" };
+      }
+
+      // Raster (PNG / GIF / JPEG).
+      // Use pixelated rendering only for small images (likely pixel art).
+      // Large images (photos/illustrations) use auto for smooth scaling.
+      const img = document.createElement("img");
+      img.src = uri;
+      img.style.imageRendering = "auto"; // updated to pixelated in onload if small
+      img.dataset.renderHint = "raster"; // picked up in onload once dims are known
+      return { el: img, type: "raster" };
+    }
+
+    /* ── Resize handler: refit zoom artwork on window resize ── */
+    let resizeRAF = null;
+    function onWindowResize() {
+      if (!modal.classList.contains("open")) return;
+      if (isHtmlUri(currentZoomUri)) return; // HTML iframes: fixed size, skip
+      cancelAnimationFrame(resizeRAF);
+      resizeRAF = requestAnimationFrame(() => {
+        if (isSvgUri(currentZoomUri)) {
+          // SVG iframe: recompute from stored intrinsic dimensions
+          const iframe = zoomArt.querySelector("iframe");
+          if (!iframe) return;
+          const nw = parseFloat(iframe.dataset.intrinsicW);
+          const nh = parseFloat(iframe.dataset.intrinsicH);
+          if (!nw || !nh) return;
+          const { w, h, label } = computePixelPerfectSize(nw, nh, false);
+          iframe.style.width  = w + "px";
+          iframe.style.height = h + "px";
+          zoomLabelEl.textContent = label;
+        } else {
+          // Raster image: recompute from naturalWidth/Height
+          const img = zoomArt.querySelector("img");
+          if (!img || !img.naturalWidth || !img.naturalHeight) return;
+          const { w, h, label } = computePixelPerfectSize(img.naturalWidth, img.naturalHeight, true);
+          img.style.width  = w + "px";
+          img.style.height = h + "px";
+          zoomLabelEl.textContent = label;
+        }
+      });
+    }
+    window.addEventListener("resize", onWindowResize);
+
+    /* ── Render zoom content ── */
+    function renderZoomContent(item) {
+      if (!item || !item.uri) { closeZoom(); return; } // safety: item was removed
+      const { uri, name, description, attributes, mintDate, contractAddress, tokenId } = item;
+
+      zoomArt.innerHTML        = "";
+      zoomLabelEl.textContent  = "";
+      zoomInfoEl.innerHTML     = "";
+      zoomInfoEl.classList.remove("single-panel"); // reset layout each time
+      currentZoomUri = uri;
+
+      const { el, type } = buildArtElement(uri);
+
+      if (type === "raster") {
+        el.onload = () => {
+          if (!el.naturalWidth || !el.naturalHeight) return;
+          // Apply pixelated rendering only for small images (pixel art).
+          // Large images get auto so JPEG/PNG smoothing works correctly.
+          const isPixelArt = el.naturalWidth <= 512 && el.naturalHeight <= 512;
+          el.style.imageRendering = isPixelArt ? "pixelated" : "auto";
+          const { w, h, label } = computePixelPerfectSize(el.naturalWidth, el.naturalHeight, true);
+          el.style.width  = w + "px";
+          el.style.height = h + "px";
+          zoomLabelEl.textContent = label;
+        };
+      } else if (type === "svg-iframe") {
+        // Size the iframe from the viewBox and store intrinsic dims so the
+        // resize handler can recompute without re-decoding the SVG.
+        const dims = extractSvgDims(uri);
+        el.dataset.intrinsicW = dims.w;
+        el.dataset.intrinsicH = dims.h;
+        const { w, h, label } = computePixelPerfectSize(dims.w, dims.h, false);
+        el.style.width  = w + "px";
+        el.style.height = h + "px";
+        zoomLabelEl.textContent = label;
+      } else if (type === "html") {
+        zoomLabelEl.textContent = "> interactive piece";
+      }
+
+      zoomArt.appendChild(el);
+
+      /* Description panel */
+      const descPanel = document.createElement("div");
+      descPanel.className = "info-panel";
+      descPanel.innerHTML = `
+        <div class="info-panel-label">description</div>
+        <div class="info-title">${escHtml(name || "untitled")}</div>
+        <div class="info-mint-date">> minted: ${escHtml(mintDate || "unknown")}</div>
+        <div class="info-description">${escHtml(description || "")}</div>`;
+
+      const ownerRow = document.createElement("div");
+      ownerRow.className = "info-owner-row";
+      ownerRow.innerHTML = `<span class="info-owner-label">owner</span><span class="info-owner-addr">loading…</span>`;
+      descPanel.appendChild(ownerRow);
+      enqueueOwnerFetch(contractAddress, tokenId, addr => {
+        ownerRow.querySelector(".info-owner-addr").textContent = addr ? shortenAddr(addr) : "unknown";
+      });
+      zoomInfoEl.appendChild(descPanel);
+
+      /* Attributes panel */
+      const attrPanel = document.createElement("div");
+      attrPanel.className = "info-panel";
+      const attrLbl = document.createElement("div");
+      attrLbl.className = "info-panel-label";
+      attrLbl.textContent = "attributes";
+      attrPanel.appendChild(attrLbl);
+
+      // Only render the attributes panel if there are attributes to show.
+      // If absent, add the single-panel class so the description centres itself.
+      if (attributes && attributes.length > 0) {
+        const grid = document.createElement("div");
+        grid.className = "attr-grid";
+        attributes.forEach(a => {
+          const el = document.createElement("div");
+          el.className = "attr-item";
+          el.innerHTML = `<div class="attr-trait">${escHtml(a.name || a.trait_type || "")}</div>
+                          <div class="attr-value">${escHtml(String(a.value || ""))}</div>`;
+          grid.appendChild(el);
+        });
+        attrPanel.appendChild(grid);
+        zoomInfoEl.appendChild(attrPanel);
+      } else {
+        zoomInfoEl.classList.add("single-panel");
+      }
+    }
+
+    function updateNavButtons() {
+      prevBtn.classList.toggle("hidden", zoomItems.length <= 1);
+      nextBtn.classList.toggle("hidden", zoomItems.length <= 1);
+      prevBtn.style.opacity = zoomIndex === 0 ? "0.2" : "";
+      nextBtn.style.opacity = zoomIndex === zoomItems.length - 1 ? "0.2" : "";
+      counter.textContent   = zoomItems.length > 1 ? `${zoomIndex + 1} / ${zoomItems.length}` : "";
+    }
+
+    function openZoom(items, itemOrIndex) {
+      zoomItems = items;
+      // Accept either an item reference OR a numeric index.
+      // Using the item reference means stale numeric indices from cards
+      // that were built before burn-splicing can never cause undefined access.
+      if (typeof itemOrIndex === "number") {
+        zoomIndex = itemOrIndex;
+      } else {
+        zoomIndex = zoomItems.indexOf(itemOrIndex);
+        if (zoomIndex === -1) return; // item was burned/removed, do nothing
+      }
+      if (!zoomItems[zoomIndex]) return; // safety guard
+      renderZoomContent(zoomItems[zoomIndex]);
+      updateNavButtons();
+      modal.classList.add("open");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeZoom() {
+      modal.classList.remove("open");
+      zoomArt.innerHTML = "";
+      // Revoke any active SVG blob URL when modal closes
+      if (currentZoomBlobUrl) {
+        URL.revokeObjectURL(currentZoomBlobUrl);
+        currentZoomBlobUrl = null;
+      }
+      document.body.style.overflow = "";
+    }
+
+    function navigateZoom(dir) {
+      const next = zoomIndex + dir;
+      if (next < 0 || next >= zoomItems.length) return;
+      zoomIndex = next;
+      renderZoomContent(zoomItems[zoomIndex]);
+      updateNavButtons();
+    }
+
+
+
+    document.getElementById("zoom-backdrop").addEventListener("click", closeZoom);
+    document.getElementById("zoom-close").addEventListener("click", closeZoom);
+    prevBtn.addEventListener("click", e => { e.stopPropagation(); navigateZoom(-1); });
+    nextBtn.addEventListener("click", e => { e.stopPropagation(); navigateZoom(+1); });
+    document.addEventListener("keydown", e => {
+      if (!modal.classList.contains("open")) return;
+      if (e.key === "Escape")     closeZoom();
+      if (e.key === "ArrowLeft")  navigateZoom(-1);
+      if (e.key === "ArrowRight") navigateZoom(+1);
+    });
+
+    /* ── Artist name ── */
+
+    // Fetches the display name associated with the wallet from TzKT.
+    // TzKT returns a 'alias' field if the address has a registered Tezos Domain
+    // or a TzKT profile name. Falls back to a shortened wallet address.
+    async function fetchArtistName() {
+      try {
+        const res = await safeFetch(`${TZKT_ORIGIN}/v1/accounts/${WALLET}`);
+        const data = await res.json();
+        // 'alias' is set when the address has a Tezos Domain or TzKT profile
+        return data?.alias || shortenAddr(WALLET);
+      } catch(e) {
+        return shortenAddr(WALLET);
+      }
+    }
+
+    function setArtistName(name) {
+      const upper = name.toUpperCase();
+      const lower = name.toLowerCase();
+
+      // 1. Browser tab / page title
+      document.title = name + " — Fully On-Chain Tezos Art";
+
+      // 2. Header logo
+      const logo = document.getElementById("artist-name");
+      if (logo) logo.textContent = upper;
+
+      // 3. Footer "all artwork ... <name>" text
+      const footName = document.getElementById("footer-artist-name");
+      if (footName) footName.textContent = lower;
+
+      // 4. Footer "visit <name>" link text
+      const footLinkName = document.getElementById("footer-artist-link-name");
+      if (footLinkName) footLinkName.textContent = lower;
+    }
+
+    /* ── API helpers ── */
+
+    // Safe fetch: validates the URL is on tzkt.io, adds a timeout,
+    // and throws clearly on network or HTTP errors.
+    const TZKT_ORIGIN = "https://api.tzkt.io";
+    async function safeFetch(url, timeoutMs = 10000) {
+      // Validate URL is on the expected origin — prevents SSRF if url is ever
+      // constructed from untrusted input
+      const parsed = new URL(url);
+      if (parsed.origin !== TZKT_ORIGIN) throw new Error("Blocked fetch to unexpected origin: " + parsed.origin);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res;
+      } catch(e) {
+        clearTimeout(timer);
+        throw e;
+      }
+    }
+
+    // Token processing limit — prevents memory exhaustion from unexpectedly
+    // large API responses (e.g. wallets with thousands of tokens)
+    const MAX_TOKENS = 2000;
+
+    async function fetchMintedTokens() {
+      const results = [];
+      let lastId = 0;
+      while (results.length < MAX_TOKENS) {
+        const url = `${TZKT_ORIGIN}/v1/tokens?firstMinter=${WALLET}&standard=fa2&limit=200&offset.cr=${lastId}`;
+        let batch;
+        try { batch = await safeFetch(url).then(r => r.json()); }
+        catch(e) { console.warn("[fetch] fetchMintedTokens failed:", e.message); break; }
+        if (!Array.isArray(batch) || !batch.length) break;
+        results.push(...batch);
+        lastId = batch[batch.length-1].id;
+        if (batch.length < 200) break;
+      }
+      return results;
+    }
+
+    async function fetchFullMetadata(contractAddress, tokenId) {
+      try {
+        const url = `${TZKT_ORIGIN}/v1/contracts/${contractAddress}/bigmaps/token_metadata/keys/${tokenId}`;
+        const data = await safeFetch(url).then(r => r.json());
+        const ti = data?.value?.token_info;
+        if (!ti) return null;
+        const decoded = {};
+        for (const [k, v] of Object.entries(ti)) decoded[k] = hexToUtf8(v);
+        return decoded;
+      } catch(e){ return null; }
+    }
+
+    function hexToUtf8(hex) {
+      if (!hex) return "";
+      try {
+        const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b,16)));
+        return new TextDecoder().decode(bytes);
+      } catch(e){ return hex; }
+    }
+
+    // Allowlist of permitted data URI media types.
+    // Only these formats are accepted from the blockchain — everything else is rejected.
+    const ALLOWED_DATA_TYPES = [
+      "data:image/png",
+      "data:image/jpeg",
+      "data:image/gif",
+      "data:image/svg+xml",
+      "data:image/webp",
+      "data:text/html",   // interactive on-chain NFTs — rendered in sandboxed iframe
+    ];
+
+    // Maximum permitted length of a data URI (~7.5MB of base64).
+    // Prevents memory exhaustion from abnormally large on-chain assets.
+    const MAX_URI_BYTES = 10_000_000;
+
+    // Stricter limit for HTML NFTs specifically — a data:text/html URI that is
+    // several MB of JS can stall or hang the browser tab even in a sandbox.
+    // Legitimate interactive on-chain NFTs are typically well under 500KB.
+    const MAX_HTML_URI_BYTES = 512_000;
+
+    function isOnChain(uri) {
+      if (!uri) return false;
+      if (uri.startsWith("data:text/html") && uri.length > MAX_HTML_URI_BYTES) {
+        console.warn("[security] HTML NFT URI exceeds MAX_HTML_URI_BYTES limit, skipping token");
+        return false;
+      }
+      if (uri.length > MAX_URI_BYTES) {
+        console.warn("[security] URI exceeds MAX_URI_BYTES limit, skipping token");
+        return false;
+      }
+      return ALLOWED_DATA_TYPES.some(t => uri.startsWith(t));
+    }
+    function isTruncated(uri) { return !!uri && uri.includes("<truncated>"); }
+
+    function parseAttributes(meta) {
+      const raw = meta.attributes;
+      if (!raw) return [];
+      try {
+        const p = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (Array.isArray(p)) return p;
+        if (typeof p === "object") return Object.entries(p).map(([k,v]) => ({name:k,value:String(v)}));
+      } catch(e) {}
+      return [];
+    }
+
+    /* ── Card builder ── */
+    function createCard(item, collectionItems) {
+      const { name, uri, contractAddress, tokenId } = item;
+      const isHtml = isHtmlUri(uri);
+
+      const card = document.createElement("div");
+      card.className = "card";
+      card.addEventListener("click", e => {
+        if (!e.target.closest(".tzkt-link")) openZoom(collectionItems, item);
+      });
+
+      const wrap = document.createElement("div");
+      wrap.className = "media-wrap";
+
+      if (isHtml) {
+        const iframe = document.createElement("iframe");
+        iframe.src = uri;
+        // allow-scripts only — intentionally NOT adding allow-same-origin.
+        // Combining both would allow the iframe to escape its sandbox.
+        iframe.sandbox = "allow-scripts";
+        iframe.scrolling = "no";
+        wrap.appendChild(iframe);
+      } else if (isSvgUri(uri)) {
+        // Card thumbnail: plain <img> loaded lazily — no blob overhead.
+        // Animation starts only when the user opens the zoom view.
+        const img = document.createElement("img");
+        img.dataset.lazySrc = uri;
+        img.style.objectFit = "contain";
+        img.style.imageRendering = "auto";
+        wrap.dataset.svgUri = uri; // stored so zoom can build animated iframe
+        wrap.appendChild(img);
+      } else {
+        const img = document.createElement("img");
+        img.dataset.lazySrc = uri; // loaded lazily when card enters viewport
+        img.style.objectFit = "contain";
+        wrap.appendChild(img);
+      }
+
+      const hint = document.createElement("span");
+      hint.className = "zoom-hint";
+      hint.textContent = "[ view ]";
+      wrap.appendChild(hint);
+      card.appendChild(wrap);
+
+      const footer = document.createElement("div");
+      footer.className = "card-footer";
+      const titleEl = document.createElement("div");
+      titleEl.className = "card-title";
+      titleEl.textContent = name || "untitled";
+      footer.appendChild(titleEl);
+
+      const metaRow = document.createElement("div");
+      metaRow.className = "card-meta-row";
+      const ownerEl = document.createElement("span");
+      ownerEl.className = "card-owner";
+      ownerEl.textContent = "…";
+      metaRow.appendChild(ownerEl);
+      const link = document.createElement("a");
+      link.className = "tzkt-link";
+      link.href = `https://tzkt.io/${contractAddress}/tokens/${tokenId}`;
+      link.target = "_blank"; link.rel = "noopener noreferrer";
+      link.textContent = "tzkt";
+      metaRow.appendChild(link);
+      footer.appendChild(metaRow);
+      card.appendChild(footer);
+
+      // Tag the owner span for async update
+      ownerEl.dataset.ownerId = `${contractAddress}-${tokenId}`;
+
+      return card;
+    }
+
+    /* ── Collection nav tab ── */
+    function buildCollectionNav(groups) {
+      const nav = document.getElementById("collection-nav");
+      nav.innerHTML = "";
+      // Use the same chronological sort as the collection sections
+      const sorted = Object.entries(groups).sort(([, a], [, b]) => {
+        const aFirst = Math.min(...a.items.map(i => i.minted));
+        const bFirst = Math.min(...b.items.map(i => i.minted));
+        return aFirst - bFirst;
+      });
+      sorted.forEach(([addr, group], i) => {
+        const tab = document.createElement("div");
+        tab.className = "nav-tab" + (i === 0 ? " active" : "");
+        tab.textContent = group.name;
+        tab.dataset.addr = addr;
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+          const target = document.getElementById("section-" + addr);
+          if (target) target.scrollIntoView({ behavior:"smooth", block:"start" });
+        });
+        nav.appendChild(tab);
+      });
+    }
+
+    // Cards per initial render and per subsequent batch per collection.
+    // Keeping this modest means the initial paint is fast regardless of
+    // collection size. More cards load automatically as the user scrolls.
+    const CARDS_PER_BATCH = 24;
+
+    /* ── Lazy image loader ──
+       Uses IntersectionObserver to set img.src only when the card
+       scrolls into view. For wallets with many tokens this means the
+       page renders instantly — images load progressively as you scroll.
+       Only the currently visible cards consume memory at any time. */
+    let lazyObserver = null;
+
+    function setupLazyLoad() {
+      if (!("IntersectionObserver" in window)) {
+        // Fallback for old browsers: load all images immediately
+        document.querySelectorAll("img[data-lazy-src]").forEach(img => {
+          img.src = img.dataset.lazySrc;
+        });
+        return;
+      }
+
+      lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target;
+          if (img.dataset.lazySrc) {
+            img.src = img.dataset.lazySrc;
+            delete img.dataset.lazySrc;
+          }
+          lazyObserver.unobserve(img);
+        });
+      }, {
+        rootMargin: "200px", // start loading 200px before entering viewport
+      });
+
+      document.querySelectorAll("img[data-lazy-src]").forEach(img => {
+        lazyObserver.observe(img);
+      });
+    }
+
+    /* ── Main ── */
+    async function init() {
+      const container = document.getElementById("collections");
+
+      // Fetch and display artist name as early as possible
+      fetchArtistName().then(setArtistName);
+
+      let tokens;
+      try { tokens = await fetchMintedTokens(); }
+      catch(err) {
+        const errEl = document.createElement("p");
+        errEl.className = "state-msg";
+        errEl.textContent = "> error: " + err.message;
+        container.innerHTML = "";
+        container.appendChild(errEl);
+        return;
+      }
+
+      // Process tokens in parallel with a concurrency limit to avoid
+      // hammering the API. Each token that needs a bigmap fallback fetches
+      // concurrently rather than waiting for the previous one to finish.
+      const METADATA_CONCURRENCY = 6;
+      const rawItems = [];
+
+      async function processToken(t) {
+        const contractAddress = t.contract.address;
+        if (EXCLUDED_CONTRACTS.has(contractAddress)) return null;
+
+        let meta    = t.metadata || {};
+        const tokenId = t.tokenId;
+        let uri     = meta.artifactUri || meta.displayUri || meta.image;
+        let name    = meta.name;
+
+        if (!uri || isTruncated(uri)) {
+          const fm = await fetchFullMetadata(contractAddress, tokenId);
+          if (fm) {
+            uri  = fm.artifactUri || fm.displayUri || fm.image;
+            name = name || fm.name;
+            meta = { ...meta, ...fm };
+          }
+        }
+        if (!isOnChain(uri)) return null;
+
+        return {
+          name:          name || "untitled",
+          description:   meta.description || "",
+          attributes:    parseAttributes(meta),
+          uri,
+          contractAddress,
+          tokenId,
+          contractAlias: t.contract.alias || null,
+          collection:    contractAddress,
+          minted:        t.firstLevel || 0,
+          mintDate:      formatDate(t.firstTime),
+          owner:         null,
+        };
+      }
+
+      // Run processToken with limited concurrency, updating progress as we go
+      const total = tokens.length;
+      for (let i = 0; i < total; i += METADATA_CONCURRENCY) {
+        const batch   = tokens.slice(i, i + METADATA_CONCURRENCY);
+        const results = await Promise.all(batch.map(processToken));
+        results.forEach(item => { if (item) rawItems.push(item); });
+        container.innerHTML = `<p class="state-msg">&gt; loading tokens... ${Math.min(i + METADATA_CONCURRENCY, total)} / ${total}</p>`;
+      }
+
+      container.innerHTML = "";
+      if (rawItems.length === 0) {
+        container.innerHTML = `<p class="state-msg">&gt; no fully on-chain tokens found.</p>`;
+        return;
+      }
+
+      // Sort tokens within each collection by mint order (oldest first)
+      rawItems.sort((a,b) => {
+        if (a.collection < b.collection) return -1;
+        if (a.collection > b.collection) return 1;
+        return a.minted - b.minted;
+      });
+
+      const grouped = {};
+      const aliasMap = {};
+      for (const item of rawItems) {
+        const k = item.collection;
+        if (!grouped[k]) grouped[k] = [];
+        grouped[k].push(item);
+        if (item.contractAlias) aliasMap[k] = item.contractAlias;
+      }
+
+      // Resolve all collection names in parallel — previously sequential awaits
+      // added ~300ms per collection for wallets with many distinct contracts.
+      await Promise.all(Object.keys(grouped).map(async addr => {
+        const name = await resolveCollectionName(addr, aliasMap[addr] || null);
+        allGroups[addr] = { name, items: grouped[addr] };
+      }));
+
+      /* Fetch owners via throttled queue — avoids 429 rate limit.
+         Tokens owned by the burn address are hidden from both the grid
+         AND the zoom navigation array so they cannot be reached via arrows. */
+      for (const addr of Object.keys(allGroups)) {
+        allGroups[addr].items.forEach(item => {
+          enqueueOwnerFetch(item.contractAddress, item.tokenId, owner => {
+            item.owner = owner;
+            if (owner === BURN_ADDRESS) {
+              // 1. Remove from DOM if the card has been rendered yet.
+              //    Cards not yet rendered (beyond initial batch) are handled
+              //    by the splice below — the sentinel renderer will skip them.
+              const ownerId = `${item.contractAddress}-${item.tokenId}`;
+              const card = document.querySelector(`[data-owner-id="${cssEscape(ownerId)}"]`)?.closest(".card");
+              if (card) card.remove();
+              // 2. Remove from the source items array so zoomItems never includes it.
+              // The group key is always item.contractAddress — no fallback needed.
+              const group = allGroups[item.contractAddress];
+              if (group) {
+                const idx = group.items.indexOf(item);
+                if (idx !== -1) group.items.splice(idx, 1);
+                // If the collection is now empty, hide the whole section block
+                if (group.items.length === 0) {
+                  const block = document.getElementById("section-" + item.contractAddress);
+                  if (block) block.style.display = "none";
+                  // Also hide the nav tab for this collection
+                  const tab = document.querySelector(`.nav-tab[data-addr="${item.contractAddress}"]`);
+                  if (tab) tab.style.display = "none";
+                }
+              }
+              // 3. If the zoom modal is currently open and showing this collection,
+              //    rebuild zoomItems from the now-filtered array and adjust the index
+              if (modal.classList.contains("open") && zoomItems.includes(item)) {
+                const zi = zoomItems.indexOf(item);
+                zoomItems.splice(zi, 1);
+                if (zoomItems.length === 0) {
+                  closeZoom();
+                } else {
+                  // If the removed item was before the current position, the current
+                  // item has shifted down by one — decrement to keep it in view.
+                  // If it was the current item or after, just clamp to valid range.
+                  if (zi < zoomIndex) {
+                    zoomIndex--;
+                  } else {
+                    zoomIndex = Math.min(zoomIndex, zoomItems.length - 1);
+                  }
+                  renderZoomContent(zoomItems[zoomIndex]);
+                  updateNavButtons();
+                }
+              }
+              return;
+            }
+            const ownerId2 = `${item.contractAddress}-${item.tokenId}`;
+            const el = document.querySelector(`[data-owner-id="${cssEscape(ownerId2)}"]`);
+            if (el) el.textContent = shortenAddr(owner);
+          });
+        });
+      }
+
+      buildCollectionNav(allGroups);
+
+      // sentinelObserver watches the bottom of each collection grid.
+      // When a sentinel enters the viewport, the next batch of cards is appended.
+      // This keeps initial DOM size small while feeling infinite to the user.
+      // Per-collection loading flag — prevents a fast scroll from queuing
+      // multiple simultaneous batch appends for the same collection.
+      const collectionLoading = {};
+
+      const sentinelObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const sentinel = entry.target;
+          const addr     = sentinel.dataset.addr;
+
+          // Skip if this collection is already mid-batch
+          if (collectionLoading[addr]) return;
+          collectionLoading[addr] = true;
+
+          const grid  = sentinel.previousElementSibling; // the .grid div
+          const group = allGroups[addr];
+          if (!group) { collectionLoading[addr] = false; return; }
+
+          const rendered  = grid.childElementCount;
+          const nextBatch = group.items.slice(rendered, rendered + CARDS_PER_BATCH);
+          if (nextBatch.length === 0) {
+            sentinelObserver.unobserve(sentinel);
+            collectionLoading[addr] = false;
+            return;
+          }
+
+          const frag = document.createDocumentFragment();
+          nextBatch.forEach(item => frag.appendChild(createCard(item, group.items)));
+          grid.appendChild(frag);
+
+          // Register new images with the lazy loader
+          grid.querySelectorAll("img[data-lazy-src]").forEach(img => {
+            if (lazyObserver) lazyObserver.observe(img);
+          });
+
+          if (rendered + nextBatch.length >= group.items.length) {
+            sentinelObserver.unobserve(sentinel);
+          }
+
+          collectionLoading[addr] = false;
+        });
+      }, {
+        rootMargin: "400px",
+      });
+
+      // Sort collections chronologically — oldest first mint across all tokens
+      // in each collection determines its position.
+      const sortedCollections = Object.entries(allGroups).sort(([, a], [, b]) => {
+        const aFirst = Math.min(...a.items.map(i => i.minted));
+        const bFirst = Math.min(...b.items.map(i => i.minted));
+        return aFirst - bFirst;
+      });
+
+      for (const [addr, group] of sortedCollections) {
+        const block = document.createElement("div");
+        block.className = "collection-block";
+        block.id = "section-" + addr;
+
+        /* Section header */
+        const hdr = document.createElement("div");
+        hdr.className = "section-header";
+        const lbl = document.createElement("div");
+        lbl.className = "section-label";
+        lbl.textContent = "collection";
+        hdr.appendChild(lbl);
+        const row = document.createElement("div");
+        row.className = "section-title-row";
+        const nameEl = document.createElement("div");
+        nameEl.className = "section-title-text";
+        nameEl.textContent = group.name;
+        row.appendChild(nameEl);
+        const collLink = document.createElement("a");
+        collLink.className = "collection-tzkt-link";
+        collLink.href = `https://tzkt.io/${addr}`;
+        collLink.target = "_blank"; collLink.rel = "noopener noreferrer";
+        collLink.textContent = "view collection on tzkt";
+        row.appendChild(collLink);
+        hdr.appendChild(row);
+        block.appendChild(hdr);
+
+        /* Grid — render first batch immediately */
+        const gridWrap = document.createElement("div");
+        gridWrap.className = "grid-wrap";
+        const grid = document.createElement("div");
+        grid.className = "grid";
+
+        const firstBatch = group.items.slice(0, CARDS_PER_BATCH);
+        const frag = document.createDocumentFragment();
+        firstBatch.forEach(item => frag.appendChild(createCard(item, group.items)));
+        grid.appendChild(frag);
+        gridWrap.appendChild(grid);
+
+        // Sentinel div — observed to trigger subsequent batches
+        if (group.items.length > CARDS_PER_BATCH) {
+          const sentinel = document.createElement("div");
+          sentinel.className = "grid-sentinel";
+          sentinel.dataset.addr = addr;
+          gridWrap.appendChild(sentinel);
+          sentinelObserver.observe(sentinel);
+        }
+
+        block.appendChild(gridWrap);
+        container.appendChild(block);
+      }
+
+      /* Highlight active nav tab on scroll */
+      const navObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const addr = entry.target.id.replace("section-","");
+            document.querySelectorAll(".nav-tab").forEach(t => {
+              t.classList.toggle("active", t.dataset.addr === addr);
+            });
+          }
+        });
+      }, { threshold: 0.3 });
+      document.querySelectorAll(".collection-block").forEach(el => navObserver.observe(el));
+
+      // Start lazy loading the first batch of images
+      setupLazyLoad();
+    }
+
+    init();
+  </script>
+</body>
+</html>
