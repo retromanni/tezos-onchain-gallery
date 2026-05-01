@@ -435,7 +435,7 @@
          The tagline below can be edited manually.
          ========================================================= -->
     <div class="header-logo" id="artist-name">&#8203;</div><!-- populated from wallet profile -->
-    <div class="header-sub">fully on-chain &nbsp;/&nbsp; tezos blockchain &nbsp;/&nbsp; pixel art</div><!-- ← tagline -->
+    <div class="header-sub">fully on-chain &nbsp;/&nbsp; tezos blockchain &nbsp;/&nbsp; art gallery</div><!-- ← tagline -->
   </header>
 
   <nav id="collection-nav"></nav>
