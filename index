@@ -31,7 +31,7 @@
     default-src 'none';
     script-src 'unsafe-inline';
     img-src 'self' data: blob:;
-    frame-src data: blob:;  /* blob: needed for SVG animation iframes */
+    frame-src data: blob:;
     connect-src https://api.tzkt.io https://tzkt.io;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src https://fonts.gstatic.com;
